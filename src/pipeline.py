@@ -1,8 +1,3 @@
-"""Orquestra o fluxo completo de ETL: API -> MongoDB Atlas -> Transform -> NeonDB.
-
-Uso:
-    python -m src.pipeline recife
-"""
 from __future__ import annotations
 
 import sys
@@ -13,17 +8,10 @@ from src.transform import Transform
 
 
 def executar_pipeline(cidade: str) -> None:
-    """Executa o pipeline completo para uma cidade: extrai da Open-Meteo, salva o
-    bruto no MongoDB Atlas, recupera de lá, transforma e carrega no NeonDB.
-
-    Args:
-        cidade: nome da cidade a processar (deve estar em `OpenMeteoExtractor.CIDADES_VALIDAS`).
-    """
     extract = OpenMeteoExtractor()
     transform = Transform()
     load = Load()
 
-    # ---- Clima atual ----
     print(f"[1/3] Extraindo clima atual de {cidade}...")
     clima_bruto = extract.get_clima_atual(cidade)
     load.load_mongo(colecao="clima_atual_raw", cidade=cidade, tipo="clima_atual", dado_bruto=clima_bruto)
@@ -33,7 +21,6 @@ def executar_pipeline(cidade: str) -> None:
     linhas_gravadas = load.load_neon(df_clima, tabela="clima_atual")
     print(f"  -> {linhas_gravadas} linha(s) gravada(s) em NeonDB.clima_atual")
 
-    # ---- Qualidade do ar ----
     print(f"[2/3] Extraindo qualidade do ar de {cidade}...")
     ar_bruto = extract.get_qualidade_ar_atual(cidade)
     load.load_mongo(colecao="qualidade_ar_raw", cidade=cidade, tipo="qualidade_ar", dado_bruto=ar_bruto)
@@ -43,7 +30,6 @@ def executar_pipeline(cidade: str) -> None:
     linhas_gravadas = load.load_neon(df_ar, tabela="qualidade_ar")
     print(f"  -> {linhas_gravadas} linha(s) gravada(s) em NeonDB.qualidade_ar")
 
-    # ---- Histórico climático (últimos 7 dias) ----
     print(f"[3/3] Extraindo histórico climático de {cidade}...")
     from datetime import datetime, timedelta
 

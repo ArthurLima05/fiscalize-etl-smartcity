@@ -1,5 +1,3 @@
-"""Camada de transformação: converte os documentos brutos recuperados do
-MongoDB Atlas em DataFrames limpos, prontos para carga no NeonDB."""
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -8,16 +6,7 @@ import pandas as pd
 
 
 class Transform:
-    """Responsável por limpar/organizar os documentos brutos (vindos do MongoDB
-    Atlas) em DataFrames pandas prontos para carga no banco relacional."""
-
     def transformar_clima_atual(self, documentos: List[Dict[str, Any]]) -> pd.DataFrame:
-        """Converte documentos brutos de clima atual em um DataFrame tabular.
-
-        Args:
-            documentos: lista de documentos lidos do MongoDB Atlas, cada um contendo
-                as chaves `cidade`, `coletado_em` e `dado_bruto` (resposta da Open-Meteo).
-        """
         linhas = []
         for documento in documentos:
             atual = documento["dado_bruto"]["current"]
@@ -35,12 +24,6 @@ class Transform:
         return pd.DataFrame(linhas)
 
     def transformar_qualidade_ar(self, documentos: List[Dict[str, Any]]) -> pd.DataFrame:
-        """Converte documentos brutos de qualidade do ar em um DataFrame tabular.
-
-        Args:
-            documentos: lista de documentos lidos do MongoDB Atlas, cada um contendo
-                as chaves `cidade`, `coletado_em` e `dado_bruto` (resposta da Open-Meteo).
-        """
         linhas = []
         for documento in documentos:
             atual = documento["dado_bruto"]["current"]
@@ -57,15 +40,6 @@ class Transform:
         return pd.DataFrame(linhas)
 
     def transformar_historico_clima(self, documentos: List[Dict[str, Any]]) -> pd.DataFrame:
-        """Converte documentos brutos de histórico diário de clima em um DataFrame tabular.
-
-        Cada documento pode conter várias datas (série diária), então cada dia vira
-        uma linha própria no DataFrame resultante.
-
-        Args:
-            documentos: lista de documentos lidos do MongoDB Atlas, cada um contendo
-                as chaves `cidade`, `coletado_em` e `dado_bruto` (resposta da Open-Meteo).
-        """
         linhas = []
         for documento in documentos:
             diario = documento["dado_bruto"]["daily"]
