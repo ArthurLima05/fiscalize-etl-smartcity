@@ -7,7 +7,8 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 from dotenv import load_dotenv
 from pymongo import MongoClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 load_dotenv()
 
@@ -51,10 +52,35 @@ class Load:
             documento["_id"] = str(documento["_id"])
         return documentos
 
-    def load_neon(self, dataframe: pd.DataFrame, tabela: str, if_exists: str = "append") -> int:
+    def load_neon(self, dataframe: pd.DataFrame, tabela: str, chave: List[str]) -> int:
+        """Grava no Neon com chave primária composta; linhas já existentes são ignoradas."""
+        dataframe = dataframe.drop_duplicates(subset=chave)
         engine = create_engine(self._neon_url)
         try:
-            dataframe.to_sql(tabela, engine, if_exists=if_exists, index=False)
+            self._garantir_tabela(engine, dataframe, tabela, chave)
+            with engine.begin() as conexao:
+                dataframe.to_sql(
+                    tabela,
+                    conexao,
+                    if_exists="append",
+                    index=False,
+                    method=self._insert_ignorando_conflito,
+                )
         finally:
             engine.dispose()
         return len(dataframe)
+
+    @staticmethod
+    def _garantir_tabela(engine, dataframe: pd.DataFrame, tabela: str, chave: List[str]) -> None:
+        if inspect(engine).has_table(tabela):
+            return
+        dataframe.head(0).to_sql(tabela, engine, index=False)
+        colunas = ", ".join(f'"{coluna}"' for coluna in chave)
+        with engine.begin() as conexao:
+            conexao.execute(text(f'ALTER TABLE "{tabela}" ADD PRIMARY KEY ({colunas})'))
+
+    @staticmethod
+    def _insert_ignorando_conflito(tabela, conexao, colunas, linhas) -> None:
+        registros = [dict(zip(colunas, linha)) for linha in linhas]
+        comando = pg_insert(tabela.table).values(registros).on_conflict_do_nothing()
+        conexao.execute(comando)

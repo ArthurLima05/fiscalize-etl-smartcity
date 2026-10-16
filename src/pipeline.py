@@ -18,7 +18,7 @@ def executar_pipeline(cidade: str) -> None:
 
     documentos_clima = load.buscar_mongo(colecao="clima_atual_raw", cidade=cidade, tipo="clima_atual")
     df_clima = transform.transformar_clima_atual(documentos_clima)
-    linhas_gravadas = load.load_neon(df_clima, tabela="clima_atual")
+    linhas_gravadas = load.load_neon(df_clima, tabela="clima_atual", chave=["cidade", "coletado_em"])
     print(f"  -> {linhas_gravadas} linha(s) gravada(s) em NeonDB.clima_atual")
 
     print(f"[2/3] Extraindo qualidade do ar de {cidade}...")
@@ -27,7 +27,7 @@ def executar_pipeline(cidade: str) -> None:
 
     documentos_ar = load.buscar_mongo(colecao="qualidade_ar_raw", cidade=cidade, tipo="qualidade_ar")
     df_ar = transform.transformar_qualidade_ar(documentos_ar)
-    linhas_gravadas = load.load_neon(df_ar, tabela="qualidade_ar")
+    linhas_gravadas = load.load_neon(df_ar, tabela="qualidade_ar", chave=["cidade", "coletado_em"])
     print(f"  -> {linhas_gravadas} linha(s) gravada(s) em NeonDB.qualidade_ar")
 
     print(f"[3/3] Extraindo histórico climático de {cidade}...")
@@ -42,7 +42,7 @@ def executar_pipeline(cidade: str) -> None:
 
     documentos_historico = load.buscar_mongo(colecao="historico_clima_raw", cidade=cidade, tipo="historico_clima")
     df_historico = transform.transformar_historico_clima(documentos_historico)
-    linhas_gravadas = load.load_neon(df_historico, tabela="historico_clima")
+    linhas_gravadas = load.load_neon(df_historico, tabela="historico_clima", chave=["cidade", "data"])
     print(f"  -> {linhas_gravadas} linha(s) gravada(s) em NeonDB.historico_clima")
 
     print("Pipeline concluído com sucesso.")
