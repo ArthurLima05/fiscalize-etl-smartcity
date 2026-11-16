@@ -36,7 +36,9 @@ def obter_engine():
 def carregar_tabela(_engine, tabela: str) -> pd.DataFrame:
     try:
         return pd.read_sql(f"SELECT * FROM {tabela}", _engine)
-    except SQLAlchemyError:
+    except SQLAlchemyError as erro:
+        st.warning(f"Falha ao ler a tabela {tabela}: {erro.__class__.__name__}")
+        carregar_tabela.clear()
         return pd.DataFrame()
 
 
@@ -59,6 +61,12 @@ engine = obter_engine()
 df_clima_atual = carregar_tabela(engine, "clima_atual")
 df_qualidade_ar = carregar_tabela(engine, "qualidade_ar")
 df_historico = carregar_tabela(engine, "historico_clima")
+
+if not df_historico.empty:
+    # O flow acumula datas a cada execução; mantém só os 7 dias mais recentes de cada cidade.
+    df_historico["data"] = pd.to_datetime(df_historico["data"])
+    limite_por_cidade = df_historico.groupby("cidade")["data"].transform("max") - pd.Timedelta(days=6)
+    df_historico = df_historico[df_historico["data"] >= limite_por_cidade]
 
 st.title("Fiscalize Smart City — Painel Ambiental da RMR")
 st.caption(
@@ -179,6 +187,7 @@ else:
             y=[precipitacao_por_cidade.get(cidade, 0) for cidade in CIDADES],
             name="Precipitação acumulada 7d (mm)",
             marker_color="#1f77b4",
+            offsetgroup="precipitacao",
         )
     )
     figura_comparativo.add_trace(
@@ -188,6 +197,7 @@ else:
             name="US AQI atual",
             marker_color="#d62728",
             yaxis="y2",
+            offsetgroup="aqi",
         )
     )
     figura_comparativo.update_layout(

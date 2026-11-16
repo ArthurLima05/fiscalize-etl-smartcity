@@ -97,14 +97,14 @@ def pipeline_flow(cidade: str = "recife", dias_historico: int = 7) -> Dict[str, 
     clima_df = transformar_clima_atual(clima_docs)
     clima_linhas = carregar_neon(clima_df, "clima_atual", ["cidade", "coletado_em"])
 
-    # Qualidade do ar (só começa depois que o clima atual foi carregado)
+
     ar_bruto = extrair_qualidade_ar(cidade, wait_for=[clima_linhas])
     ar_salvo = salvar_mongo("qualidade_ar_raw", cidade, "qualidade_ar", ar_bruto)
     ar_docs = buscar_mongo("qualidade_ar_raw", cidade, "qualidade_ar", wait_for=[ar_salvo])
     ar_df = transformar_qualidade_ar(ar_docs)
     ar_linhas = carregar_neon(ar_df, "qualidade_ar", ["cidade", "coletado_em"])
 
-    # Histórico climático (só começa depois da qualidade do ar)
+
     historico_bruto = extrair_historico_clima(cidade, dias_historico, wait_for=[ar_linhas])
     historico_salvo = salvar_mongo("historico_clima_raw", cidade, "historico_clima", historico_bruto)
     historico_docs = buscar_mongo("historico_clima_raw", cidade, "historico_clima", wait_for=[historico_salvo])
