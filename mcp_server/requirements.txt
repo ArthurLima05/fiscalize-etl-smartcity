@@ -1,0 +1,5 @@
+fastmcp>=2.10,<3
+openai
+psycopg2-binary
+python-dotenv
+pytest

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from datetime import datetime
 
 import pandas as pd
@@ -20,7 +21,7 @@ NOMES_CIDADES = {
     "paulista": "Paulista",
 }
 
-st.set_page_config(page_title="Fiscalize Smart City — Painel Ambiental", page_icon="🌦️", layout="wide")
+st.set_page_config(page_title="Fiscalize Smart City: Painel Ambiental", page_icon="🌦️", layout="wide")
 
 
 @st.cache_resource
@@ -68,10 +69,10 @@ if not df_historico.empty:
     limite_por_cidade = df_historico.groupby("cidade")["data"].transform("max") - pd.Timedelta(days=6)
     df_historico = df_historico[df_historico["data"] >= limite_por_cidade]
 
-st.title("Fiscalize Smart City — Painel Ambiental da RMR")
+st.title("Fiscalize Smart City: Painel Ambiental da RMR")
 st.caption(
     "Dados ambientais da Região Metropolitana do Recife usados para apoiar a priorização de "
-    "chamados do Fiscalize (EMLURB, CTTU, SEMC) — chuva e temperatura para alagamentos/buracos, "
+    "chamados do Fiscalize (EMLURB, CTTU, SEMC): chuva e temperatura para alagamentos/buracos, "
     "qualidade do ar para saúde pública."
 )
 
@@ -232,6 +233,198 @@ if aqi_atual is not None and aqi_atual > 100:
 
 if not algum_alerta:
     st.success(f"Sem alertas de risco ambiental elevado para {NOMES_CIDADES[cidade_selecionada]} no momento.")
+
+st.divider()
+
+st.subheader("Servidor MCP: explore e pergunte ao banco")
+st.caption(
+    "Esta seção é um cliente do servidor MCP. Cada aba usa uma ou mais tools do servidor, "
+    "que consulta o NeonDB em modo somente leitura (até 10 linhas por consulta)."
+)
+
+
+@st.cache_resource
+def iniciar_mcp():
+    """Inicia o cliente MCP em segundo plano assim que a página abre.
+
+    Importar o fastmcp e subir o servidor levam dezenas de segundos na primeira vez; em
+    thread, a página não trava e o servidor fica pronto quando o usuário precisar.
+    """
+    estado = {"cliente": None, "erro": None}
+
+    def aquecer():
+        try:
+            from mcp_server.cliente_mcp import ClienteMCP
+
+            cliente = ClienteMCP()
+            cliente.ferramentas()  # abre a conexão com o servidor
+            estado["cliente"] = cliente
+        except ImportError:
+            estado["erro"] = "Dependências do MCP ausentes. Rode: pip install -r mcp_server/requirements.txt"
+        except Exception as erro:
+            estado["erro"] = f"Não foi possível iniciar o servidor MCP: {erro}"
+
+    thread = threading.Thread(target=aquecer, daemon=True)
+    thread.start()
+    return estado, thread
+
+
+def obter_cliente_mcp():
+    estado, thread = iniciar_mcp()
+    thread.join()  # só espera na primeira chamada; depois já terminou
+    if estado["erro"]:
+        raise RuntimeError(estado["erro"])
+    return estado["cliente"]
+
+
+iniciar_mcp()  # dispara o aquecimento já na abertura da página
+
+
+def chamar_mcp(ferramenta: str, **argumentos):
+    """Chama uma tool do servidor MCP. Devolve (resultado, mensagem_de_erro)."""
+    try:
+        cliente = obter_cliente_mcp()
+    except RuntimeError as erro:
+        return None, str(erro)
+    try:
+        return cliente.chamar(ferramenta, **argumentos), None
+    except Exception as erro:
+        return None, f"Falha ao chamar a tool {ferramenta}: {erro}"
+
+
+@st.cache_data(ttl=60)
+def mcp_listar_tabelas():
+    return chamar_mcp("listar_tabelas")
+
+
+@st.cache_data(ttl=60)
+def mcp_contar_linhas(tabela: str):
+    return chamar_mcp("contar_linhas", tabela=tabela)
+
+
+@st.cache_data(ttl=60)
+def mcp_descrever_tabela(tabela: str):
+    return chamar_mcp("descrever_tabela", tabela=tabela)
+
+
+@st.cache_data(ttl=60)
+def mcp_amostra_tabela(tabela: str):
+    return chamar_mcp("executar_select", sql=f'SELECT * FROM "{tabela}"')
+
+
+@st.cache_data(ttl=60)
+def mcp_ferramentas():
+    try:
+        return obter_cliente_mcp().ferramentas(), None
+    except Exception as erro:
+        return None, f"Não foi possível listar as tools: {erro}"
+
+
+aba_pergunta, aba_tabelas, aba_sql, aba_tools = st.tabs(
+    ["💬 Perguntar (IA)", "🗂️ Tabelas", "🧾 SQL direto", "🧰 Tools do servidor"]
+)
+
+with aba_pergunta:
+    st.caption(
+        "Tool `perguntar_ao_banco`: o LLM gera o SQL, o servidor executa no NeonDB e o LLM "
+        "explica o resultado."
+    )
+    with st.form("form_pergunta"):
+        pergunta_usuario = st.text_input(
+            "Pergunta", placeholder="Ex.: Qual cidade teve mais chuva nos últimos 7 dias?"
+        )
+        enviar = st.form_submit_button("Perguntar")
+
+    if enviar and pergunta_usuario.strip():
+        with st.spinner("Consultando o servidor MCP..."):
+            resultado_mcp, erro_mcp = chamar_mcp("perguntar_ao_banco", pergunta=pergunta_usuario.strip())
+        if erro_mcp or "erro" in resultado_mcp:
+            st.error(erro_mcp or resultado_mcp["erro"])
+        else:
+            st.success(resultado_mcp["resposta"])
+            with st.expander("SQL gerado e dados"):
+                st.code(resultado_mcp["sql"], language="sql")
+                st.dataframe(pd.DataFrame(resultado_mcp["dados"]), use_container_width=True)
+
+with aba_tabelas:
+    st.caption(
+        "Tools `listar_tabelas`, `contar_linhas`, `descrever_tabela` e `executar_select` "
+        "(amostra de 10 linhas)."
+    )
+    if st.button("Carregar tabelas do banco") or st.session_state.get("tabelas_carregadas"):
+        st.session_state["tabelas_carregadas"] = True
+        tabelas_mcp, erro_mcp = mcp_listar_tabelas()
+    else:
+        tabelas_mcp, erro_mcp = None, None
+        st.info("Clique para consultar as tabelas via MCP.")
+    if erro_mcp:
+        st.error(erro_mcp)
+    elif tabelas_mcp:
+        totais = []
+        for nome_tabela in tabelas_mcp:
+            total, erro_total = mcp_contar_linhas(nome_tabela)
+            totais.append({"tabela": nome_tabela, "linhas": total if not erro_total else None})
+        st.dataframe(pd.DataFrame(totais), use_container_width=True, hide_index=True)
+
+        tabela_escolhida = st.selectbox("Tabela", tabelas_mcp)
+        colunas_mcp, erro_mcp = mcp_descrever_tabela(tabela_escolhida)
+        amostra_mcp, erro_amostra = mcp_amostra_tabela(tabela_escolhida)
+        col_esquema, col_amostra = st.columns([1, 2])
+        with col_esquema:
+            st.markdown("**Colunas**")
+            if erro_mcp:
+                st.error(erro_mcp)
+            else:
+                st.dataframe(pd.DataFrame(colunas_mcp), use_container_width=True, hide_index=True)
+        with col_amostra:
+            st.markdown("**Amostra (10 linhas)**")
+            if erro_amostra:
+                st.error(erro_amostra)
+            else:
+                st.dataframe(pd.DataFrame(amostra_mcp), use_container_width=True, hide_index=True)
+
+with aba_sql:
+    st.caption(
+        "Tool `executar_select`: o servidor só aceita um único SELECT/WITH (somente leitura, "
+        "máx. 10 linhas, timeout de 10 s). Comandos como DROP ou DELETE são recusados."
+    )
+    with st.form("form_sql"):
+        sql_usuario = st.text_area(
+            "SQL",
+            value="SELECT cidade, temperatura_c, coletado_em FROM clima_atual ORDER BY coletado_em DESC",
+            height=100,
+        )
+        executar = st.form_submit_button("Executar")
+
+    if executar:
+        with st.spinner("Executando no servidor MCP..."):
+            linhas_mcp, erro_mcp = chamar_mcp("executar_select", sql=sql_usuario)
+        if erro_mcp:
+            st.error(erro_mcp)
+        else:
+            st.dataframe(pd.DataFrame(linhas_mcp), use_container_width=True, hide_index=True)
+
+with aba_tools:
+    st.caption("Tools expostas pelo servidor, descobertas via protocolo MCP (`list_tools`).")
+    if st.button("Listar tools do servidor") or st.session_state.get("tools_carregadas"):
+        st.session_state["tools_carregadas"] = True
+        ferramentas_mcp, erro_mcp = mcp_ferramentas()
+    else:
+        ferramentas_mcp, erro_mcp = None, None
+    if erro_mcp:
+        st.error(erro_mcp)
+    elif ferramentas_mcp:
+        st.dataframe(
+            pd.DataFrame(
+                [{"tool": nome, "descrição": (desc or "").strip().splitlines()[0]} for nome, desc in ferramentas_mcp]
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+    st.markdown(
+        "`dashboard` → `ClienteMCP` → **servidor MCP** (`FastMCP`) → NeonDB e LLM. "
+        "O dashboard só fala MCP; a segurança do SQL fica no servidor."
+    )
 
 st.divider()
 
